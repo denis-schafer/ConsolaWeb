@@ -578,7 +578,7 @@
                         <ol class="help">
                             <li>Selecciona el archivo ROM/ISO de tu disco.</li>
                             <li>Elige la plataforma correcta en el selector.</li>
-                            <li>Si juegas PlayStation 1, carga primero el archivo BIOS (por ejemplo <code>scph1001.bin</code>) y guárdalo.</li>
+                            <li>Si juegas PlayStation 1, carga primero el archivo BIOS (recomendado <code>scph5501.bin</code>; también sirve <code>scph1001.bin</code>) y guárdalo.</li>
                             <li>Pulsa <strong>Guardar ROM localmente</strong>. El archivo se almacena en el navegador.</li>
                             <li>En la biblioteca aparecerá el juego; pulsa <strong>Jugar</strong>.</li>
                             <li>Usa el botón <strong>Pantalla completa</strong> que aparece arriba del emulador para expandir el juego.</li>
@@ -678,9 +678,10 @@
         const dataPath = window.location.origin + '/emulatorjs/data/';
 
         // Fallback de BIOS en el servidor. Subir los archivos a public/bios/.
+        // Orden: primero la mejor/más compatible, luego alternativas.
         const biosBaseUrl = '{{ url('/bios') }}';
         const serverBiosFiles = {
-            pcsx_rearmed: 'scph1001.bin'
+            pcsx_rearmed: ['scph5501.bin', 'scph1001.bin']
         };
 
         const controlNames = {
@@ -1344,7 +1345,7 @@
                 return;
             }
             biosPanel.classList.remove('hidden');
-            biosNameEl.textContent = core === 'pcsx_rearmed' ? 'scph1001.bin / scph5501.bin' : 'BIOS';
+            biosNameEl.textContent = core === 'pcsx_rearmed' ? 'scph5501.bin (recomendado) / scph1001.bin' : 'BIOS';
             const bios = await getBios(core).catch(() => null);
             if (bios) {
                 biosStatus.textContent = `BIOS guardada: ${escapeHtml(bios.name)} (${formatSize(bios.size)})`;
@@ -1727,23 +1728,29 @@
             let biosUrl = '';
             if (coreRequiresBios(rom.core)) {
                 let bios = await getBios(rom.core).catch(() => null);
-                if (!bios && serverBiosFiles[rom.core]) {
-                    try {
-                        const serverBiosUrl = biosBaseUrl + '/' + serverBiosFiles[rom.core];
-                        const res = await fetch(serverBiosUrl);
-                        if (res.ok) {
-                            const buffer = await res.arrayBuffer();
-                            await saveBios(rom.core, serverBiosFiles[rom.core], buffer);
-                            bios = await getBios(rom.core);
+                const candidates = serverBiosFiles[rom.core] || [];
+                if (!bios && candidates.length) {
+                    for (const biosName of candidates) {
+                        try {
+                            const serverBiosUrl = biosBaseUrl + '/' + biosName;
+                            const headRes = await fetch(serverBiosUrl, { method: 'HEAD' });
+                            if (!headRes.ok) continue;
+                            const res = await fetch(serverBiosUrl);
+                            if (res.ok) {
+                                const buffer = await res.arrayBuffer();
+                                await saveBios(rom.core, biosName, buffer);
+                                bios = await getBios(rom.core);
+                                break;
+                            }
+                        } catch (err) {
+                            console.error('Error descargando BIOS del servidor:', err);
                         }
-                    } catch (err) {
-                        console.error('Error descargando BIOS del servidor:', err);
                     }
                 }
                 if (bios) {
                     biosUrl = URL.createObjectURL(new Blob([bios.data]));
-                } else if (serverBiosFiles[rom.core]) {
-                    biosUrl = biosBaseUrl + '/' + serverBiosFiles[rom.core];
+                } else if (candidates.length) {
+                    biosUrl = biosBaseUrl + '/' + candidates[0];
                 }
             }
 
