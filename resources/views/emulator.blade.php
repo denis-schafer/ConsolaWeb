@@ -1313,6 +1313,21 @@
             return core === 'pcsx_rearmed';
         }
 
+        async function isServerBiosAvailable(core) {
+            const candidates = serverBiosFiles[core];
+            if (!candidates) return false;
+            const list = Array.isArray(candidates) ? candidates : [candidates];
+            for (const name of list) {
+                try {
+                    const res = await fetch(biosBaseUrl + '/' + name, { method: 'HEAD' });
+                    if (res.ok) return true;
+                } catch (e) {
+                    // ignorar errores de red
+                }
+            }
+            return false;
+        }
+
         function coreLabel(core) {
             const labels = {
                 nestopia: 'NES',
@@ -1347,8 +1362,12 @@
             biosPanel.classList.remove('hidden');
             biosNameEl.textContent = core === 'pcsx_rearmed' ? 'scph5501.bin (recomendado) / scph1001.bin' : 'BIOS';
             const bios = await getBios(core).catch(() => null);
+            const serverAvailable = await isServerBiosAvailable(core);
             if (bios) {
                 biosStatus.textContent = `BIOS guardada: ${escapeHtml(bios.name)} (${formatSize(bios.size)})`;
+                biosStatus.className = 'bios-status ok';
+            } else if (serverAvailable) {
+                biosStatus.textContent = 'BIOS disponible en el servidor; se usará automáticamente al jugar.';
                 biosStatus.className = 'bios-status ok';
             } else {
                 biosStatus.textContent = 'No se ha guardado BIOS para esta consola.';
@@ -1382,11 +1401,13 @@
             const core = coreSelect.value;
             if (coreRequiresBios(core)) {
                 const bios = await getBios(core).catch(() => null);
-                if (!bios) {
+                const serverAvailable = await isServerBiosAvailable(core);
+                if (!bios && !serverAvailable) {
                     setStatus('Esta consola requiere BIOS. Cárgala antes de guardar la ROM.', true);
                     return;
                 }
             }
+
             saveBtn.disabled = true;
             setStatus('Leyendo archivo...');
             try {
