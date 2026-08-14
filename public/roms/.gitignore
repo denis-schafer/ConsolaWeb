@@ -1,0 +1,3 @@
+# Ignorar archivos ROM subidos manualmente; no subir a GitHub.
+*
+!.gitignore

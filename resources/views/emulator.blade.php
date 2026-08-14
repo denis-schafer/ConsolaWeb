@@ -517,7 +517,7 @@
 <body>
     <main>
         <aside>
-            <div class="panel">
+            <div class="panel" id="rom-upload-panel">
                 <details>
                     <summary>Cargar ROM</summary>
                     <div>
@@ -915,7 +915,8 @@
         }
 
         async function getAllRoms() {
-            const roms = await getAll(ROMS_STORE);
+            const localRoms = await getAll(ROMS_STORE);
+            const roms = [...serverRoms, ...localRoms];
             return roms.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         }
 
@@ -1298,6 +1299,7 @@
         let emulatorFrame = null;
         let emulatorReady = false;
         let controlsReloadTimeout = null;
+        let serverRoms = [];
 
         const coreByExtension = {
             nes: 'nestopia',
@@ -1548,17 +1550,21 @@
                 const thumbHTML = rom.image
                     ? `<div class="thumb"><img src="${escapeHtml(rom.image)}" alt=""></div>`
                     : '';
+                const sourceLabel = rom.server ? 'Servidor' : 'Local';
+                const editButton = rom.server
+                    ? ''
+                    : `<button class="edit icon-btn rom-edit-btn secondary" data-id="${rom.id}" title="Editar">${iconEdit()}</button>`;
                 const li = document.createElement('li');
                 li.innerHTML = `
                     ${thumbHTML}
                     <div class="info">
                         <div class="name">${escapeHtml(displayRomName(rom.name))}</div>
-                        <div class="meta">${coreLabel(rom.core)} · ${formatSize(rom.size)} · ${new Date(rom.createdAt).toLocaleString()}</div>
+                        <div class="meta">${coreLabel(rom.core)} · ${formatSize(rom.size)} · ${sourceLabel} · ${new Date(rom.createdAt).toLocaleString()}</div>
                     </div>
                     <div class="actions">
                         <button class="play icon-btn rom-play-btn" data-id="${rom.id}" title="Jugar">${iconPlay()}</button>
                     </div>
-                    <button class="edit icon-btn rom-edit-btn secondary" data-id="${rom.id}" title="Editar">${iconEdit()}</button>
+                    ${editButton}
                 `;
                 listEl.appendChild(li);
             });
@@ -1601,13 +1607,15 @@
         listEl.addEventListener('click', async (e) => {
             const target = e.target.closest('button');
             if (!target) return;
-            const id = Number(target.dataset.id);
+            const rawId = target.dataset.id;
+            const id = rawId.startsWith('server:') ? rawId : Number(rawId);
             if (target.classList.contains('edit')) {
-                if (target.disabled) return;
+                if (target.disabled || String(id).startsWith('server:')) return;
                 await editRom(id, target);
                 return;
             }
             if (target.classList.contains('delete')) {
+                if (String(id).startsWith('server:')) return;
                 const confirmed = await showConfirm('¿Eliminar esta ROM y todas sus partidas guardadas?', 'Eliminar ROM');
                 if (!confirmed) return;
                 await deleteRom(id);
@@ -1735,16 +1743,20 @@
 
             showLoadingOverlay(rom);
 
-            const fullRom = await getRomFull(rom.id);
-            if (!fullRom || !fullRom.data) {
-                hideLoadingOverlay();
-                await showAlert('No se pudo cargar la ROM.', 'Error');
-                restorePlayButtons();
-                return;
+            let gameUrl;
+            if (rom.server) {
+                gameUrl = rom.url;
+            } else {
+                const fullRom = await getRomFull(rom.id);
+                if (!fullRom || !fullRom.data) {
+                    hideLoadingOverlay();
+                    await showAlert('No se pudo cargar la ROM.', 'Error');
+                    restorePlayButtons();
+                    return;
+                }
+                const gameBlob = new Blob([fullRom.data]);
+                gameUrl = URL.createObjectURL(gameBlob);
             }
-
-            const gameBlob = new Blob([fullRom.data]);
-            const gameUrl = URL.createObjectURL(gameBlob);
 
             let biosUrl = '';
             if (coreRequiresBios(rom.core)) {
@@ -1966,7 +1978,28 @@
             }
         }
 
+        async function loadServerRoms() {
+            try {
+                const res = await fetch('{{ url('/api/roms') }}');
+                if (!res.ok) return;
+                const roms = await res.json();
+                serverRoms = roms.map(r => ({
+                    ...r,
+                    id: 'server:' + r.id,
+                    server: true,
+                    createdAt: r.createdAt || new Date().toISOString()
+                }));
+                if (serverRoms.length > 0) {
+                    const uploadPanel = document.getElementById('rom-upload-panel');
+                    if (uploadPanel) uploadPanel.classList.add('hidden');
+                }
+            } catch (err) {
+                console.error('Error cargando ROMs del servidor:', err);
+            }
+        }
+
         async function init() {
+            await loadServerRoms();
             await loadControls();
             renderControls();
             renderLibrary();
