@@ -80,7 +80,7 @@
                 window.EJS_forceLegacyCores = useLegacy;
                 window.EJS_defaultControls = controls;
                 window.EJS_volume = 1;
-                window.EJS_defaultOptions = { 'audio_latency': '32' };
+                window.EJS_defaultOptions = { 'audio_latency': '128' };
 
                 if (biosUrl) window.EJS_biosUrl = biosUrl;
                 if (loadStateUrl) window.EJS_loadStateURL = loadStateUrl;
