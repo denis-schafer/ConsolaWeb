@@ -657,7 +657,7 @@
         </div>
     </div>
 
-    <script src="/js/jszip.min.js"></script>
+    <script src="{{ asset('js/jszip.min.js') }}"></script>
     <script>
         const DB_NAME = 'ConsoleWebDB';
         const DB_VERSION = 5;
@@ -675,7 +675,7 @@
         const modalConfirm = document.getElementById('modal-confirm');
         const modalDelete = document.getElementById('modal-delete');
 
-        const dataPath = window.location.origin + '/emulatorjs/data/';
+        const dataPath = '{{ url('/emulatorjs/data') }}/';
 
         // Fallback de BIOS en el servidor. Subir los archivos a public/bios/.
         // Orden: primero la mejor/más compatible, luego alternativas.
@@ -1793,7 +1793,7 @@
                 loadStateUrl = URL.createObjectURL(new Blob([latestSave.data]));
             }
 
-            hostEl.innerHTML = `<iframe id="emulator-frame" src="/play" allow="fullscreen; gamepad" title="Emulador"></iframe>`;
+            hostEl.innerHTML = `<iframe id="emulator-frame" src="{{ url('/play') }}" allow="fullscreen; gamepad" title="Emulador"></iframe>`;
             emulatorFrame = document.getElementById('emulator-frame');
             emulatorControls.style.display = 'flex';
 
