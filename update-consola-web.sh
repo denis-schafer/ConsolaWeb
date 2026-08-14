@@ -92,17 +92,34 @@ actualizar_desde_git() {
     else
         cd "$RUTA_PROYECTO"
         if [ ! -d ".git" ]; then
-            log "ERROR" "$RED" "El directorio existe pero no es un repositorio Git"
-            exit 1
-        fi
-        git config --local safe.directory "$RUTA_PROYECTO"
-        # NOTA: no usamos 'git clean' para no borrar archivos no trackeados del usuario.
-        # Los cores, .env y otros archivos ignorados quedan intactos.
-        git fetch origin
-        git reset --hard origin/main
-        if [ $? -ne 0 ]; then
-            log "ERROR" "$RED" "Error al actualizar desde Git"
-            exit 1
+            # El directorio existe pero no es un repositorio Git.
+            # Si está vacío (o solo contiene .env), clonamos dentro.
+            local contenido
+            contenido=$(ls -A . 2>/dev/null | grep -v '^\.env$' | head -1)
+            if [ -n "$contenido" ]; then
+                log "ERROR" "$RED" "El directorio $RUTA_PROYECTO existe, no es un repositorio Git y no está vacío."
+                log "INFO" "$YELLOW" "Borrá o mové el contenido antes de continuar."
+                exit 1
+            fi
+            log "INFO" "$YELLOW" "El directorio existe pero está vacío. Inicializando repositorio y descargando código..."
+            git init
+            git remote add origin "$REPO_URL"
+            git fetch origin
+            git reset --hard origin/main
+            if [ $? -ne 0 ]; then
+                log "ERROR" "$RED" "Error al descargar el repositorio"
+                exit 1
+            fi
+        else
+            git config --local safe.directory "$RUTA_PROYECTO"
+            # NOTA: no usamos 'git clean' para no borrar archivos no trackeados del usuario.
+            # Los cores, .env y otros archivos ignorados quedan intactos.
+            git fetch origin
+            git reset --hard origin/main
+            if [ $? -ne 0 ]; then
+                log "ERROR" "$RED" "Error al actualizar desde Git"
+                exit 1
+            fi
         fi
     fi
 
