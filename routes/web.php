@@ -1,11 +1,7 @@
 <?php
 
+use App\Http\Controllers\EmulatorController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('emulator');
-});
-
-Route::get('/play', function () {
-    return view('play');
-});
+Route::get('/', [EmulatorController::class, 'index']);
+Route::get('/play', [EmulatorController::class, 'play']);
