@@ -55,6 +55,39 @@ Abrir `http://127.0.0.1:8000` en el navegador.
 >
 > **Cores**: este repositorio no incluye los cores de EmulatorJS (`public/emulatorjs/data/cores/`) por su tamaño. Descargalos antes de usar el emulador.
 
+## Deploy en VPS (producción)
+
+1. Subí el script al servidor:
+
+```bash
+scp update-consola-web.sh root@tuvps:/home/
+```
+
+2. (Opcional/recomendado) Copiá tu `.env` local al VPS antes de correr el script por primera vez:
+
+```bash
+ssh root@tuvps "mkdir -p /var/www/html/consola-web"
+scp .env root@tuvps:/var/www/html/consola-web/.env
+```
+
+3. Ejecutá el script como root:
+
+```bash
+ssh root@tuvps
+chmod +x /home/update-consola-web.sh
+/home/update-consola-web.sh
+```
+
+El script:
+
+- Clona o actualiza el repositorio desde `origin/main`.
+- **No elimina** los cores de EmulatorJS ya descargados.
+- **No elimina** archivos no rastreados (por ejemplo, imágenes o archivos que hayas subido a mano).
+- Respeta tu `.env` si ya existe; si no, crea uno básico con SQLite.
+- Ejecuta migraciones, optimiza cachés y ajusta permisos.
+
+Para forzar la re-descarga de cores, borrá la carpeta `public/emulatorjs/data/cores/` antes de correr el script.
+
 ## Uso
 
 1. **Cargar ROM**: seleccioná el archivo y la plataforma correcta.
