@@ -1,0 +1,3 @@
+# Ignorar archivos BIOS subidos manualmente; no subir a GitHub.
+*
+!.gitignore

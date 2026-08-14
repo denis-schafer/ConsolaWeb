@@ -677,6 +677,12 @@
 
         const dataPath = window.location.origin + '/emulatorjs/data/';
 
+        // Fallback de BIOS en el servidor. Subir los archivos a public/bios/.
+        const biosBaseUrl = '{{ url('/bios') }}';
+        const serverBiosFiles = {
+            pcsx_rearmed: 'scph1001.bin'
+        };
+
         const controlNames = {
             0: 'B', 1: 'Y', 2: 'Select', 3: 'Start',
             4: 'D-Pad Arriba', 5: 'D-Pad Abajo', 6: 'D-Pad Izquierda', 7: 'D-Pad Derecha',
@@ -1720,9 +1726,24 @@
 
             let biosUrl = '';
             if (coreRequiresBios(rom.core)) {
-                const bios = await getBios(rom.core).catch(() => null);
+                let bios = await getBios(rom.core).catch(() => null);
+                if (!bios && serverBiosFiles[rom.core]) {
+                    try {
+                        const serverBiosUrl = biosBaseUrl + '/' + serverBiosFiles[rom.core];
+                        const res = await fetch(serverBiosUrl);
+                        if (res.ok) {
+                            const buffer = await res.arrayBuffer();
+                            await saveBios(rom.core, serverBiosFiles[rom.core], buffer);
+                            bios = await getBios(rom.core);
+                        }
+                    } catch (err) {
+                        console.error('Error descargando BIOS del servidor:', err);
+                    }
+                }
                 if (bios) {
                     biosUrl = URL.createObjectURL(new Blob([bios.data]));
+                } else if (serverBiosFiles[rom.core]) {
+                    biosUrl = biosBaseUrl + '/' + serverBiosFiles[rom.core];
                 }
             }
 

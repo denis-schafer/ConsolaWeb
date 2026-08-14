@@ -12,6 +12,12 @@ TOKEN_GIT=""  # Opcional: token de GitHub para repos privados
 CARPETA_BACKUP="/tmp/consola-web-backups"
 PROPIETARIO="apache:apache"  # Cambiar a www-data:www-data en Ubuntu/Debian si aplica
 
+# Configuración de BIOS (solo para uso personal/legal)
+# Dejá BIOS_URL vacío si vas a subir la BIOS manualmente al VPS.
+# Si tenés una URL propia o un backup local, completala aquí.
+BIOS_URL=""
+BIOS_LOCAL_BACKUP=""
+
 # Colores
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -210,14 +216,14 @@ configurar_sqlite() {
     fi
 }
 
-# Descargar cores de EmulatorJS
+# Descargar cores de EmulatorJS desde GitHub Releases
 # Esto se hace UNA SOLA VEZ en el VPS, luego todos los usuarios los usan desde el servidor
 descargar_cores() {
     log "CORES" "$YELLOW" "Descargando cores de EmulatorJS..."
     cd "$RUTA_PROYECTO"
 
     local cores_dir="public/emulatorjs/data/cores"
-    local zip_path="/tmp/emulatorjs-cores.zip"
+    local tmp_dir="/tmp/emulatorjs-extract-$$"
 
     mkdir -p "$cores_dir"
 
@@ -228,20 +234,100 @@ descargar_cores() {
         return 0
     fi
 
-    curl -L --fail -o "$zip_path" "https://cdn.emulatorjs.org/latest/data/cores.zip"
-    if [ $? -ne 0 ]; then
-        log "ERROR" "$RED" "Error al descargar cores.zip"
+    if ! command -v 7z >/dev/null 2>&1; then
+        log "INFO" "$YELLOW" "Instalando p7zip..."
+        if command -v dnf >/dev/null 2>&1; then
+            dnf install -y p7zip-plugins
+        elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y p7zip-full
+        else
+            log "ERROR" "$RED" "No se pudo instalar p7zip. Instalalo manualmente."
+            return 1
+        fi
+    fi
+
+    local release_json="/tmp/ejs-release.json"
+    curl -L --fail -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/EmulatorJS/EmulatorJS/releases/latest" -o "$release_json"
+    if [ $? -ne 0 ] || [ ! -s "$release_json" ]; then
+        log "ERROR" "$RED" "No se pudo obtener el último release de EmulatorJS"
         return 1
     fi
 
-    unzip -o "$zip_path" -d "$cores_dir"
-    if [ $? -ne 0 ]; then
-        log "ERROR" "$RED" "Error al extraer cores.zip"
+    local tag=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$release_json" | head -1)
+    rm -f "$release_json"
+    if [ -z "$tag" ]; then
+        log "ERROR" "$RED" "No se encontró la versión en la respuesta de GitHub"
         return 1
     fi
 
-    rm -f "$zip_path"
+    local version="${tag#v}"
+    local asset_name="${version}.7z"
+    local asset_url="https://github.com/EmulatorJS/EmulatorJS/releases/download/${tag}/${asset_name}"
+    local asset_path="/tmp/${asset_name}"
+
+    log "INFO" "$YELLOW" "Descargando $asset_name desde GitHub Releases..."
+    curl -L --fail -o "$asset_path" "$asset_url"
+    if [ $? -ne 0 ]; then
+        log "ERROR" "$RED" "Error al descargar $asset_name"
+        return 1
+    fi
+
+    mkdir -p "$tmp_dir"
+    log "INFO" "$YELLOW" "Extrayendo cores..."
+    7z x -y "$asset_path" -o"$tmp_dir" >/dev/null
+    if [ $? -ne 0 ]; then
+        log "ERROR" "$RED" "Error al extraer $asset_name"
+        rm -rf "$tmp_dir" "$asset_path"
+        return 1
+    fi
+
+    local extracted_cores=$(find "$tmp_dir" -type d -path "*/data/cores" | head -1)
+    if [ -z "$extracted_cores" ]; then
+        log "ERROR" "$RED" "No se encontró data/cores dentro del release"
+        rm -rf "$tmp_dir" "$asset_path"
+        return 1
+    fi
+
+    cp -a "$extracted_cores/." "$cores_dir/"
+    rm -rf "$tmp_dir" "$asset_path"
+
     log "SUCCESS" "$GREEN" "Cores descargados y extraídos en $cores_dir"
+}
+
+# Descargar/copiar BIOS de consolas que la requieran (uso personal/legal)
+# El script no provee URLs de BIOS con copyright. Completá BIOS_URL o BIOS_LOCAL_BACKUP.
+descargar_bios() {
+    log "BIOS" "$YELLOW" "Verificando archivos BIOS..."
+    cd "$RUTA_PROYECTO"
+
+    local bios_dir="public/bios"
+    local bios_file="$bios_dir/scph1001.bin"
+
+    mkdir -p "$bios_dir"
+
+    if [ -f "$bios_file" ]; then
+        log "INFO" "$GREEN" "BIOS ya presente ($bios_file)"
+        return 0
+    fi
+
+    if [ -n "$BIOS_LOCAL_BACKUP" ] && [ -f "$BIOS_LOCAL_BACKUP/scph1001.bin" ]; then
+        cp "$BIOS_LOCAL_BACKUP/scph1001.bin" "$bios_file"
+        log "SUCCESS" "$GREEN" "BIOS copiada desde backup local"
+        return 0
+    fi
+
+    if [ -n "$BIOS_URL" ]; then
+        curl -L --fail -o "$bios_file" "$BIOS_URL"
+        if [ $? -eq 0 ]; then
+            log "SUCCESS" "$GREEN" "BIOS descargada desde URL configurada"
+            return 0
+        else
+            log "ERROR" "$RED" "No se pudo descargar BIOS desde $BIOS_URL"
+        fi
+    fi
+
+    log "WARN" "$YELLOW" "BIOS no encontrada. Subila manualmente a $bios_file o configurá BIOS_URL/BIOS_LOCAL_BACKUP"
 }
 
 # Configurar permisos
@@ -281,6 +367,11 @@ verificar_despliegue() {
         cores_ok="OK"
     fi
 
+    local bios_ok="FALTAN"
+    if [ -f "public/bios/scph1001.bin" ]; then
+        bios_ok="OK"
+    fi
+
     echo "--- VERIFICACIÓN ---"
     echo "Directorio: $(pwd)"
     echo "Git: $(git log --oneline -1 2>/dev/null || echo 'No hay commits')"
@@ -289,6 +380,7 @@ verificar_despliegue() {
     echo ".env: $([ -f '.env' ] && echo 'OK' || echo 'FALLO')"
     echo "APP_KEY: $(grep '^APP_KEY=' .env | head -1)"
     echo "Cores: $cores_ok"
+    echo "BIOS: $bios_ok"
     echo "--------------------"
 }
 
@@ -311,6 +403,7 @@ main() {
     generar_clave_app
     configurar_sqlite
     descargar_cores
+    descargar_bios
     configurar_permisos
     optimizar_laravel
     verificar_despliegue
