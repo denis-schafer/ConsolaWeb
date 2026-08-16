@@ -659,13 +659,16 @@
 
     <script src="{{ asset('js/jszip.min.js') }}"></script>
     <script>
+
         const DB_NAME = 'ConsoleWebDB';
-        const DB_VERSION = 5;
+        const DB_VERSION = 6;
+
         const ROMS_STORE = 'roms';
         const ROMS_DATA_STORE = 'roms_data';
         const SAVES_STORE = 'saves';
         const BIOS_STORE = 'bios';
         const SETTINGS_STORE = 'settings';
+        const ROM_CONTROLS_STORE = 'rom_controls';
 
         const modalOverlay = document.getElementById('modal-overlay');
         const modalTitle = document.getElementById('modal-title');
@@ -790,6 +793,10 @@
         let currentControlsPlayer = 0;
         let awaitingKey = null;
 
+        let modalControls = null;
+        let modalControlsPlayer = 0;
+        let awaitingModalKey = null;
+
         function openDB() {
             return new Promise((resolve, reject) => {
                 const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -812,6 +819,9 @@
                     }
                     if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
                         db.createObjectStore(SETTINGS_STORE, { keyPath: 'id' });
+                    }
+                    if (!db.objectStoreNames.contains(ROM_CONTROLS_STORE)) {
+                        db.createObjectStore(ROM_CONTROLS_STORE, { keyPath: 'romId' });
                     }
 
                     if (e.oldVersion < 5 && db.objectStoreNames.contains(ROMS_STORE) && db.objectStoreNames.contains(ROMS_DATA_STORE)) {
@@ -932,6 +942,7 @@
             await deleteRecord(ROMS_DATA_STORE, id);
             const saves = await getSavesByRom(id);
             for (const s of saves) await deleteRecord(SAVES_STORE, s.id);
+            await deleteRecord(ROM_CONTROLS_STORE, id);
         }
 
         async function saveBios(core, name, buffer) {
@@ -940,6 +951,18 @@
 
         async function getBios(core) {
             return getRecord(BIOS_STORE, core);
+        }
+
+        async function getRomControls(romId) {
+            return getRecord(ROM_CONTROLS_STORE, romId).catch(() => null);
+        }
+
+        async function saveRomControls(romId, controls) {
+            return putRecord(ROM_CONTROLS_STORE, { romId, controls, updatedAt: new Date().toISOString() });
+        }
+
+        async function deleteRomControls(romId) {
+            return deleteRecord(ROM_CONTROLS_STORE, romId);
         }
 
         async function saveGameState(romId, data) {
@@ -1123,6 +1146,17 @@
 
         function isKeyUsed(player, excludeId, key) {
             const playerControls = currentControls[player] || {};
+            const fallback = defaultControls[player] || {};
+            for (let i = 0; i <= 13; i++) {
+                if (i === excludeId) continue;
+                const cfg = playerControls[i] || fallback[i];
+                if (cfg && cfg.value === key) return i;
+            }
+            return -1;
+        }
+
+        function isModalKeyUsed(player, excludeId, key) {
+            const playerControls = modalControls[player] || {};
             const fallback = defaultControls[player] || {};
             for (let i = 0; i <= 13; i++) {
                 if (i === excludeId) continue;
@@ -1487,7 +1521,59 @@
             });
         });
 
+        modalBody.addEventListener('click', (e) => {
+            if (!modalControls) return;
+            const btn = e.target.closest('.modal-key-input');
+            if (btn) {
+                startModalKeyCapture(btn);
+                return;
+            }
+            const tab = e.target.closest('.player-tab');
+            if (tab && tab.closest('#edit-rom-controls-tabs')) {
+                modalControlsPlayer = Number(tab.dataset.player);
+                renderModalControls();
+                return;
+            }
+            if (e.target.closest('#edit-rom-controls-reset')) {
+                modalControls[modalControlsPlayer] = JSON.parse(JSON.stringify(currentControls[modalControlsPlayer] || currentControls[0]));
+                renderModalControls();
+                setModalControlsStatus(`Restaurados los controles generales del Jugador ${modalControlsPlayer + 1}.`, false, true);
+            }
+        });
+
         window.addEventListener('keydown', (e) => {
+            if (awaitingModalKey) {
+                e.preventDefault();
+                if (e.key === 'Escape') {
+                    cancelModalKeyCapture();
+                    return;
+                }
+                const mapped = eventKeyToEjs(e);
+                if (!mapped) {
+                    setModalControlsStatus('Tecla no reconocida. Prueba con otra.', true);
+                    return;
+                }
+                const usedBy = isModalKeyUsed(modalControlsPlayer, awaitingModalKey.id, mapped);
+                if (usedBy !== -1) {
+                    setModalControlsStatus(`La tecla "${displayKey(mapped)}" ya está asignada a ${controlNames[usedBy]} en el jugador ${modalControlsPlayer + 1}.`, true);
+                    return;
+                }
+                if (!modalControls[modalControlsPlayer]) {
+                    modalControls[modalControlsPlayer] = {};
+                }
+                modalControls[modalControlsPlayer][awaitingModalKey.id] = {
+                    value: mapped,
+                    value2: (defaultControls[modalControlsPlayer]?.[awaitingModalKey.id] || defaultControls[0][awaitingModalKey.id]).value2
+                };
+                awaitingModalKey.btn.textContent = displayKey(mapped);
+                awaitingModalKey.btn.classList.remove('waiting');
+                const id = awaitingModalKey.id;
+                const player = modalControlsPlayer;
+                awaitingModalKey = null;
+                setModalControlsStatus(`"${controlNames[id]}" ahora usa ${displayKey(mapped)} (Jugador ${player + 1}).`, false, true);
+                return;
+            }
+
             if (!awaitingKey) return;
             e.preventDefault();
 
@@ -1531,6 +1617,53 @@
             setControlsStatus(`Valores por defecto restaurados para el Jugador ${currentControlsPlayer + 1}.`, false, true);
         });
 
+        function setModalControlsStatus(msg, isError = false, isSuccess = false) {
+            const el = document.getElementById('edit-rom-controls-status');
+            if (!el) return;
+            el.textContent = msg;
+            el.className = 'status' + (isError ? ' error' : '') + (isSuccess ? ' success' : '');
+        }
+
+        function renderModalControls() {
+            const list = document.getElementById('edit-rom-controls-list');
+            if (!list) return;
+            list.innerHTML = '';
+            const playerControls = modalControls[modalControlsPlayer] || {};
+            const fallback = defaultControls[modalControlsPlayer] || defaultControls[0];
+            for (let i = 0; i <= 13; i++) {
+                const cfg = playerControls[i] || fallback[i];
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <span class="action">${controlNames[i]}</span>
+                    <button class="key-input modal-key-input" id="modal-key-${i}" data-id="${i}" type="button">${escapeHtml(displayKey(cfg.value))}</button>
+                `;
+                list.appendChild(li);
+            }
+            const tabs = document.querySelectorAll('#edit-rom-controls-tabs .player-tab');
+            tabs.forEach(t => t.classList.toggle('active', Number(t.dataset.player) === modalControlsPlayer));
+        }
+
+        function startModalKeyCapture(btn) {
+            if (awaitingModalKey) cancelModalKeyCapture();
+            const id = Number(btn.dataset.id);
+            awaitingModalKey = { id, btn };
+            btn.textContent = 'Presiona una tecla...';
+            btn.classList.add('waiting');
+            window.focus();
+            setModalControlsStatus('Presiona la tecla que quieres asignar...');
+        }
+
+        function cancelModalKeyCapture() {
+            if (!awaitingModalKey) return;
+            const playerControls = modalControls[modalControlsPlayer] || {};
+            const fallback = defaultControls[modalControlsPlayer] || defaultControls[0];
+            const cfg = playerControls[awaitingModalKey.id] || fallback[awaitingModalKey.id];
+            awaitingModalKey.btn.textContent = displayKey(cfg.value);
+            awaitingModalKey.btn.classList.remove('waiting');
+            awaitingModalKey = null;
+            setModalControlsStatus('Cambio cancelado.');
+        }
+
         function displayRomName(name) {
             return name.replace(/\.[^/.]+$/, '');
         }
@@ -1551,9 +1684,6 @@
                     ? `<div class="thumb"><img src="${escapeHtml(rom.image)}" alt=""></div>`
                     : '';
                 const sourceLabel = rom.server ? 'Servidor' : 'Local';
-                const editButton = rom.server
-                    ? ''
-                    : `<button class="edit icon-btn rom-edit-btn secondary" data-id="${rom.id}" title="Editar">${iconEdit()}</button>`;
                 const li = document.createElement('li');
                 li.innerHTML = `
                     ${thumbHTML}
@@ -1564,7 +1694,7 @@
                     <div class="actions">
                         <button class="play icon-btn rom-play-btn" data-id="${rom.id}" title="Jugar">${iconPlay()}</button>
                     </div>
-                    ${editButton}
+                    <button class="edit icon-btn rom-edit-btn secondary" data-id="${rom.id}" title="Editar">${iconEdit()}</button>
                 `;
                 listEl.appendChild(li);
             });
@@ -1636,33 +1766,54 @@
         async function editRom(id, btnEdit) {
             setButtonLoading(btnEdit, true);
 
-            let rom;
-            try {
-                rom = await getRecord(ROMS_STORE, id);
-            } catch (err) {
-                setButtonLoading(btnEdit, false);
-                await showAlert('Error al cargar la ROM: ' + err.message, 'Error');
-                return;
+            let rom = filteredRoms.find(r => r.id === id);
+            if (!rom) {
+                try {
+                    rom = await getRecord(ROMS_STORE, id);
+                } catch (err) {
+                    setButtonLoading(btnEdit, false);
+                    await showAlert('Error al cargar la ROM: ' + err.message, 'Error');
+                    return;
+                }
             }
             if (!rom) {
                 setButtonLoading(btnEdit, false);
                 return;
             }
 
+            const isServer = rom.server === true;
             const ext = rom.name.includes('.') ? rom.name.split('.').pop() : '';
             const currentName = displayRomName(rom.name);
             let newImage = rom.image || '';
 
+            const existingControls = await getRomControls(id);
+            modalControls = existingControls?.controls
+                ? JSON.parse(JSON.stringify(existingControls.controls))
+                : JSON.parse(JSON.stringify(currentControls));
+            const initialModalControls = JSON.parse(JSON.stringify(modalControls));
+            modalControlsPlayer = 0;
+
             const bodyHTML = `
                 <label for="edit-rom-name">Nombre</label>
-                <input id="edit-rom-name" type="text" value="${escapeHtml(currentName)}">
+                <input id="edit-rom-name" type="text" value="${escapeHtml(currentName)}" ${isServer ? 'disabled' : ''}>
+                ${isServer ? '<p class="hint">Las ROMs del servidor no se pueden renombrar desde aquí.</p>' : ''}
                 <label for="edit-rom-image">Imagen (opcional)</label>
-                <input id="edit-rom-image" type="file" accept="image/*">
+                <input id="edit-rom-image" type="file" accept="image/*" ${isServer ? 'disabled' : ''}>
                 ${newImage ? `<img id="edit-rom-preview" class="modal-preview" src="${escapeHtml(newImage)}" alt="">` : ''}
+
+                <h4 style="margin-top:1.2rem;">Controles</h4>
+                <p class="hint">Si no tocás nada, usa los controles generales de la plataforma.</p>
+                <div id="edit-rom-controls-tabs" class="player-tabs">
+                    <button class="player-tab active" data-player="0" type="button">Jugador 1</button>
+                    <button class="player-tab" data-player="1" type="button">Jugador 2</button>
+                </div>
+                <ul id="edit-rom-controls-list" class="controls-list"></ul>
+                <div id="edit-rom-controls-status" class="status"></div>
+                <button id="edit-rom-controls-reset" type="button" class="secondary small">Restaurar controles generales</button>
             `;
 
-            const result = await showModal({
-                title: 'Editar ROM',
+            const modalPromise = showModal({
+                title: isServer ? 'Configurar controles' : 'Editar ROM',
                 message: '',
                 bodyHTML,
                 confirmText: 'Guardar',
@@ -1670,9 +1821,19 @@
                 danger: false,
                 deleteText: 'Eliminar ROM'
             });
+            renderModalControls();
+            const result = await modalPromise;
+
+            const finalModalControls = modalControls ? JSON.parse(JSON.stringify(modalControls)) : null;
+            modalControls = null;
+            awaitingModalKey = null;
 
             if (result === 'delete') {
                 setButtonLoading(btnEdit, false);
+                if (isServer) {
+                    await showAlert('Las ROMs del servidor se eliminan directamente en el VPS.', 'Info');
+                    return;
+                }
                 const confirmed = await showConfirm('¿Eliminar esta ROM y todas sus partidas guardadas?', 'Eliminar ROM');
                 if (!confirmed) return;
                 setButtonLoading(btnEdit, true);
@@ -1697,20 +1858,27 @@
             try {
                 const nameInput = document.getElementById('edit-rom-name');
                 const imageInput = document.getElementById('edit-rom-image');
-                let newName = nameInput.value.trim();
+                let newName = (nameInput.value || currentName).trim();
                 if (!newName) throw new Error('El nombre no puede estar vacío.');
 
                 if (ext) newName += '.' + ext;
 
-                if (imageInput.files && imageInput.files[0]) {
+                if (!isServer && imageInput.files && imageInput.files[0]) {
                     newImage = await fileToDataURL(imageInput.files[0]);
                 }
 
-                await updateRom(id, { name: newName, image: newImage });
-                if (currentRomId === id && currentRom) {
-                    currentRom.name = newName;
-                    currentRom.image = newImage;
+                if (!isServer) {
+                    await updateRom(id, { name: newName, image: newImage });
+                    if (currentRomId === id && currentRom) {
+                        currentRom.name = newName;
+                        currentRom.image = newImage;
+                    }
                 }
+
+                if (finalModalControls && JSON.stringify(finalModalControls) !== JSON.stringify(initialModalControls)) {
+                    await saveRomControls(id, finalModalControls);
+                }
+
                 closeModal(true);
                 await renderLibrary();
             } catch (err) {
@@ -1797,7 +1965,9 @@
             emulatorFrame = document.getElementById('emulator-frame');
             emulatorControls.style.display = 'flex';
 
-            const controlsForEjs = buildEjsControls(currentControls);
+            const romSpecificControls = await getRomControls(rom.id).catch(() => null);
+            const effectiveControls = romSpecificControls?.controls || currentControls;
+            const controlsForEjs = buildEjsControls(effectiveControls);
 
             const initListener = (e) => {
                 if (!e.data || e.data.type !== 'playReady') return;
