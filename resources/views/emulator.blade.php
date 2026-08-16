@@ -472,6 +472,10 @@
             padding: 1.25rem;
             width: 100%;
             max-width: 420px;
+            max-height: 90vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
         .modal h3 {
@@ -576,16 +580,13 @@
                     <summary>¿Cómo iniciar un juego?</summary>
                     <div>
                         <ol class="help">
-                            <li>Selecciona el archivo ROM/ISO de tu disco.</li>
-                            <li>Elige la plataforma correcta en el selector.</li>
-                            <li>Si juegas PlayStation 1, carga primero el archivo BIOS (recomendado <code>scph5501.bin</code>; también sirve <code>scph1001.bin</code>) y guárdalo.</li>
-                            <li>Pulsa <strong>Guardar ROM localmente</strong>. El archivo se almacena en el navegador.</li>
-                            <li>En la biblioteca aparecerá el juego; pulsa <strong>Jugar</strong>.</li>
-                            <li>Usa el botón <strong>Pantalla completa</strong> que aparece arriba del emulador para expandir el juego.</li>
-                            <li>Si usas <code>consola-web.test</code> sin HTTPS, algunos cores exigentes (PS1, N64, etc.) pueden no arrancar. En ese caso usa <code>https://consola-web.test</code> o <code>http://127.0.0.1:8000</code>.</li>
-                            <li>Si cambiás de protocolo (HTTP ↔ HTTPS) o de navegador, usá <strong>Exportar</strong> para descargar un archivo <code>.zip</code> con toda tu biblioteca, y luego <strong>Importar</strong> en la nueva URL para restaurarla.</li>
+                            <li><strong>ROMs en el servidor:</strong> si el administrador subió ROMs a la carpeta del servidor, aparecen automáticamente en la biblioteca. Hacé clic en <strong>Jugar</strong>.</li>
+                            <li><strong>Subir una ROM local:</strong> si no hay ROMs en el servidor, usá el panel <strong>Cargar ROM</strong>, seleccioná el archivo, elegí la plataforma y pulsá <strong>Guardar ROM localmente</strong>.</li>
+                            <li>Para cambiar el nombre, la imagen o los controles de una ROM, pulsá el botón <strong>Editar</strong> (lápiz). Los controles específicos de una ROM se configuran dentro del modal, desplegando la sección <strong>Controles específicos de esta ROM</strong>.</li>
+                            <li>Durante el juego, usá el botón <strong>Pantalla completa</strong> para expandir el emulador.</li>
+                            <li>Podés exportar tu biblioteca local con <strong>Exportar</strong> e importarla en otro navegador con <strong>Importar</strong>.</li>
                         </ol>
-                        <p class="hint">Las ROMs, BIOS y partidas guardadas nunca salen de tu equipo; se guardan en IndexedDB.</p>
+                        <p class="hint">Las partidas guardadas y los controles personalizados se guardan en el navegador (IndexedDB). Las ROMs del servidor permanecen en el servidor.</p>
                     </div>
                 </details>
             </div>
@@ -1801,15 +1802,17 @@
                 <input id="edit-rom-image" type="file" accept="image/*" ${isServer ? 'disabled' : ''}>
                 ${newImage ? `<img id="edit-rom-preview" class="modal-preview" src="${escapeHtml(newImage)}" alt="">` : ''}
 
-                <h4 style="margin-top:1.2rem;">Controles</h4>
-                <p class="hint">Si no tocás nada, usa los controles generales de la plataforma.</p>
-                <div id="edit-rom-controls-tabs" class="player-tabs">
-                    <button class="player-tab active" data-player="0" type="button">Jugador 1</button>
-                    <button class="player-tab" data-player="1" type="button">Jugador 2</button>
-                </div>
-                <ul id="edit-rom-controls-list" class="controls-list"></ul>
-                <div id="edit-rom-controls-status" class="status"></div>
-                <button id="edit-rom-controls-reset" type="button" class="secondary small">Restaurar controles generales</button>
+                <details style="margin-top:1.2rem;">
+                    <summary>Controles específicos de esta ROM</summary>
+                    <p class="hint">Si no tocás nada, usa los controles generales de la plataforma.</p>
+                    <div id="edit-rom-controls-tabs" class="player-tabs">
+                        <button class="player-tab active" data-player="0" type="button">Jugador 1</button>
+                        <button class="player-tab" data-player="1" type="button">Jugador 2</button>
+                    </div>
+                    <ul id="edit-rom-controls-list" class="controls-list"></ul>
+                    <div id="edit-rom-controls-status" class="status"></div>
+                    <button id="edit-rom-controls-reset" type="button" class="secondary small">Restaurar controles generales</button>
+                </details>
             `;
 
             const modalPromise = showModal({
